@@ -23,7 +23,7 @@ any folders you like, and a Mac, a Windows PC or a Linux computer. Nothing
 to install.
 
 **1. Download two files** from the
-[releases page](https://github.com/CathodeJay/sleekmenu64/releases/latest):
+[releases page](https://github.com/codyps/sleekmenu64/releases):
 `SleekMenu64.z64` and the Game Catalog Manager for your computer.
 
 | Your computer | The Game Catalog Manager |
@@ -164,6 +164,13 @@ make perf N64_INST=/path/to/libdragon       # the ROM with a frame-time readout
 ```
 
 `make help` lists the rest.
+
+The `release` GitHub Actions workflow builds the downloadable desktop apps.
+Run it manually to get build artifacts without creating a release; pushing a
+`v*` tag creates a draft release after the builds and smoke tests pass.
+The Mac ZIP contains one universal2 app for Intel and Apple silicon, built
+with python.org's universal2 Python and merged Pillow wheels. The same ZIP
+is tested on both architectures, including card preparation and drag and drop.
 
 ## Support
 
