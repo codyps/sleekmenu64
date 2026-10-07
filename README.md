@@ -28,8 +28,7 @@ to install.
 
 | Your computer | The Game Catalog Manager |
 |---|---|
-| Mac with Apple silicon (M1 and later) | `SleekMenu-Catalog-Manager-mac-arm64.zip` |
-| Mac with an Intel processor | `SleekMenu-Catalog-Manager-mac-intel.zip` |
+| Mac with Apple silicon or an Intel processor | `SleekMenu-Catalog-Manager-mac.zip` |
 | Windows | `SleekMenu-Catalog-Manager-windows.exe` |
 | Linux | `SleekMenu-Catalog-Manager-linux` |
 

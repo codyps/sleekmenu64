@@ -51,9 +51,7 @@ jobs:
       matrix:
         include:
           - os: macos-15
-            name: mac-arm64
-          - os: macos-15-intel
-            name: mac-intel
+            name: mac
           - os: windows-latest
             name: windows
           - os: ubuntu-22.04
@@ -63,11 +61,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
+        if: runner.os != 'macOS'
         with:
           python-version: '3.12'
 
+      - name: Install universal2 Python (including Tcl/Tk)
+        if: runner.os == 'macOS'
+        run: |
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/python.pkg" \
+            https://www.python.org/ftp/python/3.12.10/python-3.12.10-macos11.pkg
+          sudo installer -pkg "$RUNNER_TEMP/python.pkg" -target /
+          /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -m venv "$RUNNER_TEMP/universal-python"
+          echo "$RUNNER_TEMP/universal-python/bin" >> "$GITHUB_PATH"
+
       - name: Install Pillow and PyInstaller
-        run: pip install -r requirements-dev.txt "pyinstaller>=6,<7"
+        run: python -m pip install -r requirements-dev.txt "pyinstaller>=6,<7"
+
+      - name: Make Pillow universal2
+        if: runner.os == 'macOS'
+        run: bash .github/scripts/universal-pillow.sh
 
       - name: Check the window's logic
         # The parts that need no screen, on every platform; the window
@@ -89,48 +101,28 @@ jobs:
         shell: bash
         run: |
           case "${{ runner.os }}" in
-            macOS) shape="--onedir" ;;
-            *)     shape="--onefile" ;;
+            macOS) shape="--onedir --target-architecture universal2 --additional-hooks-dir .github/pyinstaller-hooks" ;;
+            *)     shape="--onefile --collect-all tkinterdnd2" ;;
           esac
           python -m PyInstaller --noconfirm $shape --windowed \
             --name "SleekMenu-Catalog-Manager" --paths . \
             --add-data "data/coverdb.csv:data" \
             --add-data "data/genres.csv:data" \
             --add-data "data/LICENSE:data" \
-            --collect-all tkinterdnd2 \
             tools/sleekmenu_gui.py
 
       - name: Prove the build starts and prepares a card
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          from tests.rom_fixtures import write_rom
-          from tests.test_sleekmenu_prep import write_collection
-          write_rom(Path("smoke/CARD/ROMS/Wave Race 64 (USA).z64"), 0x11, 0x22, game_code="WR")
-          write_collection(Path("smoke/CARD/release-metadata.zip"), "NWRE", zipped=True)
-          PY
-          case "${{ runner.os }}" in
-            macOS)   app="dist/SleekMenu-Catalog-Manager.app/Contents/MacOS/SleekMenu-Catalog-Manager" ;;
-            Windows) app="dist/SleekMenu-Catalog-Manager.exe" ;;
-            *)       app="dist/SleekMenu-Catalog-Manager" ;;
-          esac
-          card="$PWD/smoke/CARD"
-          run=""
-          case "${{ runner.os }}" in
-            Linux)   sudo apt-get install -y xvfb; run="xvfb-run -a" ;;
-            Windows) card="$(pwd -W)/smoke/CARD" ;;
-          esac
-          $run "$app" --smoke --card "$card" | tee smoke/report.txt
-          test -f smoke/CARD/sleekmenu/catalog.ebc
-          test -f smoke/CARD/sleekmenu/covers.pak
-          # The window works without drag and drop, so a build where its
-          # library will not load is flagged here rather than failed. A
-          # windowed program on Windows prints nothing to read.
-          if [ "${{ runner.os }}" != "Windows" ]; then
-            grep -q "drag and drop: yes" smoke/report.txt \
-              || echo "::warning::drag and drop did not load in the ${{ matrix.name }} build"
-          fi
+          bash .github/scripts/smoke-window.sh
+
+      - name: Verify universal executable and Python extensions
+        if: runner.os == 'macOS'
+        run: |
+          lipo dist/SleekMenu-Catalog-Manager.app/Contents/MacOS/SleekMenu-Catalog-Manager -verify_arch arm64 x86_64
+          while IFS= read -r -d '' extension; do
+            lipo "$extension" -verify_arch arm64 x86_64
+          done < <(find dist/SleekMenu-Catalog-Manager.app -type f -name '*.so' -print0)
 
       - name: Package
         shell: bash
@@ -146,10 +138,54 @@ jobs:
           esac
           ls -la out
 
+      # Upload the Mac ZIP directly: wrapping it in another ZIP causes
+      # Archive Utility to produce a second, same-named archive.
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'macOS'
+        with:
+          path: out/SleekMenu-Catalog-Manager-mac.zip
+          archive: false
+          if-no-files-found: error
+
       - uses: actions/upload-artifact@v4
+        if: runner.os != 'macOS'
         with:
           name: SleekMenu-Catalog-Manager-${{ matrix.name }}
           path: out/*
+
+  mac-smoke:
+    # Test the SAME zipped app on real Intel and Apple Silicon runners.
+    needs: window
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - uses: actions/download-artifact@v8
+        with:
+          name: SleekMenu-Catalog-Manager-mac.zip
+          path: out
+          skip-decompress: true
+      - name: Unpack and test the universal app
+        run: |
+          mkdir -p dist
+          cp out/SleekMenu-Catalog-Manager-mac.zip dist/
+          # Exercise the same extractor users get by double-clicking in Finder.
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          archive = Path("dist/SleekMenu-Catalog-Manager-mac.zip").resolve()
+          subprocess.run(["open", "-W", "-n", "-a", "Archive Utility", str(archive)],
+                         check=True, timeout=90)
+          PY
+          bash .github/scripts/smoke-window.sh
+          grep -q "drag and drop: yes" smoke/report.txt
 
   archive:
     # The same tool for anyone with Python, run from the card.
@@ -171,7 +207,7 @@ jobs:
     # platform that failed never leaves a release with three downloads out
     # of four. A draft: the ROM goes on by hand, and nothing is public
     # until Publish is pressed.
-    needs: [window, archive]
+    needs: [window, mac-smoke, archive]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -179,10 +215,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
+          pattern: '!SleekMenu-Catalog-Manager-mac.zip'
           path: out
           merge-multiple: true
+
+      # Preserve the directly uploaded Mac ZIP as a release asset.
+      - uses: actions/download-artifact@v8
+        with:
+          name: SleekMenu-Catalog-Manager-mac.zip
+          path: out
+          skip-decompress: true
 
       - name: The notes, from CHANGELOG.md
         run: |
