@@ -119,9 +119,9 @@ jobs:
       - name: Verify universal executable and Python extensions
         if: runner.os == 'macOS'
         run: |
-          lipo -verify_arch arm64 x86_64 dist/SleekMenu-Catalog-Manager.app/Contents/MacOS/SleekMenu-Catalog-Manager
+          lipo dist/SleekMenu-Catalog-Manager.app/Contents/MacOS/SleekMenu-Catalog-Manager -verify_arch arm64 x86_64
           while IFS= read -r -d '' extension; do
-            lipo -verify_arch arm64 x86_64 "$extension"
+            lipo "$extension" -verify_arch arm64 x86_64
           done < <(find dist/SleekMenu-Catalog-Manager.app -type f -name '*.so' -print0)
 
       - name: Package
